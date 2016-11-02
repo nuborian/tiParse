@@ -38,7 +38,7 @@ The lib based on a "active_user" lifecycle. So after you init the lib and logged
 	- Full Support for Uploading Files
     
 - ## *Push*
-	- Push-Support is coming in V 2.1.0
+	- Push-Support is coming in V 1.1.0
 	
 
 # **Parse Server**
