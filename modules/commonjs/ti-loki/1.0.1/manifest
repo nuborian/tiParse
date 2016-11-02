@@ -1,0 +1,10 @@
+version: 1.0.1
+description: LokiJS in-memory database persistence on Titanium
+author: Ianko
+license: MIT
+copyright: Copyright © 2016 Ianko
+name: ti-loki
+moduleid: ti-loki
+guid: 5447adb9-52ad-0421-e2ed-50f8d8fec76a
+platform: commonjs
+minsdk: 3.2.0.GA
