@@ -42,7 +42,7 @@ The lib based on a "active_user" lifecycle. So after you init the lib and logged
 	
 
 # **Parse Server**
-At the moment I am using [Sashido](https://www.sashido.io/) sashido.com for hosting my Parse-Server. I really can recommand you to try their service. If you do - maybe use [Refferal](https://www.sashido.io/?ref=1z7e4LDdRN) ;)
+At the moment I am using [Sashido](https://www.sashido.io/) for hosting my Parse-Server. I really can recommand you to try their service. If you do - maybe use [Refferal](https://www.sashido.io/?ref=1z7e4LDdRN) ;) Of course you can setup your own installation on Providers like AWS, Heroku etc. At least it's a great starting point to develop your new Application.
 	
 ---
 
