@@ -52,7 +52,7 @@ At the moment I am using [Sashido](https://www.sashido.io/) sashido.com for host
 
 // Parse Init
 TiParse.init({
-  base_url : "htttps://www.yourparseserver.com/1/)",
+  base_url : "https://www.yourparseserver.com/1/)",
   app_key : "your_app_key",
   rest_key : "your_rest_key"
 }).then(function(active_user){
