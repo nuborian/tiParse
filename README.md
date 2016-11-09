@@ -54,12 +54,13 @@ At the moment I am using [Sashido](https://www.sashido.io/) for hosting my Parse
 TiParse.init({
   base_url : "https://www.yourparseserver.com/1/)",
   app_key : "your_app_key",
-  rest_key : "your_rest_key"
+  rest_key : "your_rest_key",
+  usermodel : M_User
 }).then(function(active_user){
   if( active_user ){
     console.log("I am already available - Jeah :)");
   }else{
-    var user = new UserModel();
+    var user = new M_User();
     user.login({
       username : "username",
       password : "password"
@@ -79,13 +80,13 @@ var TiParse = require('TiParse');
 /**
  * User-Model
  */
-var UserModel = Backbone.Model.extend({
+var M_User = Backbone.Model.extend({
   // Custom Functions and Properties
   //fullname : function(){
   //  return this.get('first_name') + " " + this.get("last_name");
   //}
 });
-_.extend(UserModel.prototype, TiParse.Backbone.UserMixin);
+_.extend(M_User.prototype, TiParse.Backbone.UserMixin);
 ```
 
 As you can see, I've created a global Reference to "my" User-Model. You can extend it with custom functions and properties as you need them. In this case there is a commented function to get the fullname of an user based on his/her first_name and last_name attributes.
