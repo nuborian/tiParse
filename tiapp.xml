@@ -3,15 +3,14 @@
     <id>com.example</id>
     <name>tiParse</name>
     <version>1.0</version>
-    <publisher>Nico</publisher>
+    <publisher>Example</publisher>
     <url>undefined</url>
     <description>undefined</description>
-    <copyright>2016 by Nico</copyright>
+    <copyright>2016 by</copyright>
     <icon>appicon.png</icon>
     <fullscreen>false</fullscreen>
     <navbar-hidden>false</navbar-hidden>
     <analytics>false</analytics>
-    <guid>c64d54d3-9512-4fc0-9999-3b5ee6f1b06a</guid>
     <property name="ti.ui.defaultunit" type="string">dp</property>
     <property name="run-on-main-thread" type="bool">true</property>
     <ios>
@@ -64,5 +63,5 @@
     <plugins>
         <plugin version="1.0">ti.alloy</plugin>
     </plugins>
-    <property name="appc-app-id" type="string">57f0ff5f08368e24100b2ec5</property>
+    <property name="appc-app-id" type="string">xxx</property>
 </ti:app>
