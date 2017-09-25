@@ -47,19 +47,6 @@ var rest_key = "";
 var basic_userModel = null;
 
 /**
-* Indicates weather Guest Mode is active or not
-* @type {Boolean}
-*/
-var IS_GUEST = false;
-
-exports.isGuest = isGuest;
-
-function isGuest(){
-	console.log("calling isGuest");
-	return IS_GUEST;
-}
-
-/**
 * Represents the acitve logged in User
 * @type {[type]}
 */
@@ -88,7 +75,6 @@ var methodMap = {
 */
 var timeout = 10000;
 
-
 /**
 * User Class
 * @type {String}
@@ -107,18 +93,24 @@ var CLASSES = 'classes';
 */
 var FILES = 'files';
 
-
-
 var PARSE_ERROR_BASE_URL_MISSING = "Please provide a valid Base URL as Endpoint";
-
-
-
 
 var initdeferred;
 
 
+/**
+* Device Token for Push
+* @type {[type]}
+*/
+var device_token = null;
 
+/**
+* [push_send description]
+* @type {Boolean}
+*/
+var push_register = false;
 
+var pushCallback;
 
 (function() {
 
@@ -169,8 +161,6 @@ var initdeferred;
 				rest_key = options.rest_key;
 				basic_userModel = options.usermodel;
 
-				//	console.log( "SESSION TOKEN ON STARTUP: " + session_token);
-
 				// Setup Loki Database
 				setupLokiDatabase().then(function() {
 					console.debug("TiParse :::::: Assign Keys");
@@ -188,143 +178,241 @@ var initdeferred;
 						}).value;
 
 						// Restore active_user from Database
-						console.log("Active User Restore: " + coll_statics.findOne({
-							key : "active_user"
-						}).value.first_name);
+						/*("Active User Restore: " + coll_statics.findOne({
+						key : "active_user"
+					}).value.first_name);*/
 
-						active_user = new basic_userModel(coll_statics.findOne({
-							key : "active_user"
-						}).value);
+					active_user = new basic_userModel(coll_statics.findOne({
+						key : "active_user"
+					}).value);
 
+					//
+					// Check Online-Status
+					//
+					if (Titanium.Network.online) {
 						//
-						// Check Online-Status
+						// Update Active User
 						//
-						if (Titanium.Network.online) {
-							//
-							// Update Active User
-							//
-							active_user.me().then(function(response){
-								initdeferred.resolve(active_user);
-							});
-						} else {
+						active_user.me().then(function(response) {
 							initdeferred.resolve(active_user);
-						}
+						});
 					} else {
-						console.debug("TiParse :::::: No Session Token available");
-						initdeferred.resolve(null);
+						initdeferred.resolve(active_user);
 					}
-				});
-
-				// Return
-				return initdeferred.promise;
-			},
-
-			/**
-			* Upload a new File to Parse-Server
-			* @param  {[type]} options [description]
-			* @return {[type]}         [description]
-			*/
-			uploadFile : function(options) {
-				var deferred = Q.defer();
-
-				if (!options.filename) {
-					console.error("Please provide a filename");
+				} else {
+					console.debug("TiParse :::::: No Session Token available");
+					initdeferred.resolve(null);
 				}
-				if (!options.filedata) {
-					console.error("Please provide a valid File");
-				}
-				if (!options.filetype) {
-					console.error("Please specify your FileType");
-				}
-				if (!options.extension) {
-					console.error("Please specify your File extension like png, jpg, txt, etc.");
-				}
-
-				// Set Params for Files
-				var params = {};
-				params.type = "POST";
-				params.url = base_url + "files/" + options.filename + "." + options.extension;
-				params.data = options.filedata;
-				params.customheader = [options.filetype];
-
-				// Make HTTP Request
-				http_request(params, function(response) {
-					if (response.success) {
-						var res = JSON.parse(response.responseText);
-
-						// Call Success
-						return deferred.resolve(res);
-					} else {
-						var err = JSON.parse(response.responseText);
-						params.error(err);
-						return deferred.reject(err);
-					}
-				});
-
-				return deferred.promise;
-			},
-
-			registerForPush : function(opts) {
-			var cloudDefer = Q.defer();
-
-			var params = {};
-			params.url = base_url + "installations";
-			params.type = "POST";
-			params.options = {
-				"deviceType": "android",
-				"pushType": "gcm",
-				"deviceToken": opts.token,
-				"GCMSenderId": "**",
-				"channels": [
-					""
-				]
-			};
-
-			var xhr = Titanium.Network.createHTTPClient({
 			});
 
-			xhr.onload = function(){
-				cloudDefer.resolve( JSON.parse(this.responseText) );
+			// Return
+			return initdeferred.promise;
+		},
+
+		/**
+		* Upload a new File to Parse-Server
+		* @param  {[type]} options [description]
+		* @return {[type]}         [description]
+		*/
+		uploadFile : function(options) {
+			var deferred = Q.defer();
+
+			if (!options.filename) {
+				console.error("Please provide a filename");
+			}
+			if (!options.filedata) {
+				console.error("Please provide a valid File");
+			}
+			if (!options.filetype) {
+				console.error("Please specify your FileType like image/jpeg");
+			}
+			if (!options.extension) {
+				console.error("Please specify your File extension like png, jpg, txt, etc.");
 			}
 
-			xhr.onerror = function(){
-				console.error(this.responseText);
+			// Set Params for Files
+			var params = {};
+			params.type = "POST";
+			params.url = base_url + "files/" + options.filename + "." + options.extension;
+			params.data = options.filedata;
+			params.customheader = [options.filetype];
+
+			// Make HTTP Request
+			http_request(params, function(response) {
+				if (response.success) {
+					var res = JSON.parse(response.responseText);
+
+					// Call Success
+					return deferred.resolve(res);
+				} else {
+					var err = JSON.parse(response.responseText);
+					params.error(err);
+					return deferred.reject(err);
+				}
+			});
+
+			return deferred.promise;
+		},
+
+
+
+		/**
+		* Setup Push for Android and iOS
+		* @param  {[type]} opts [description]
+		* @return {[type]}      [description]
+		*/
+		initPush : function(opts){
+			pushCallback = opts.callback;
+
+			if(OS_IOS){
+
+				//var deviceToken = null;
+
+				// Check if the device is running iOS 8 or later
+				if (Ti.Platform.name == "iPhone OS" && parseInt(Ti.Platform.version.split(".")[0]) >= 8) {
+
+					// Wait for user settings to be registered before registering for push notifications
+					Ti.App.iOS.addEventListener('usernotificationsettings', function registerForPush() {
+
+						// Remove event listener once registered for push notifications
+						Ti.App.iOS.removeEventListener('usernotificationsettings', registerForPush);
+
+						Ti.Network.registerForPushNotifications({
+							success: registerPushSuccess,
+							error: registerPushError,
+							callback: pushCallback
+						});
+					});
+
+					// Register notification types to use
+					Ti.App.iOS.registerUserNotificationSettings({
+						types: [
+							Ti.App.iOS.USER_NOTIFICATION_TYPE_ALERT,
+							Ti.App.iOS.USER_NOTIFICATION_TYPE_SOUND,
+							Ti.App.iOS.USER_NOTIFICATION_TYPE_BADGE
+						]
+					});
+				}
+				// For iOS 7 and earlier
+				else {
+					Ti.Network.registerForPushNotifications({
+						// Specifies which notifications to receive
+						types: [
+							Ti.Network.NOTIFICATION_TYPE_BADGE,
+							Ti.Network.NOTIFICATION_TYPE_ALERT,
+							Ti.Network.NOTIFICATION_TYPE_SOUND
+						],
+						success: registerPushSuccess,
+						error: registerPushError,
+						callback: pushCallback
+					});
+				}
+
+			}else{
+
+
+				try{
+				var FCM = require('ti.fcm');
+				FCM.registerForPushNotifications({
+					// The callback to invoke when a notification arrives.
+					callback: function(e){
+						pushCallback(e);
+					},
+
+					// The callback invoked when you have the device token.
+					success: function(e){
+						console.log("PUSH SUCCESS", e);
+						registerPushSuccess(e);
+					},
+
+					// The callback invoked on some errors.
+					error: function(e){
+						console.log("PUSH ERROR");
+						registerPushError("error");
+					}
+				});
+			}catch(error){
+				alert(error);
 			}
+				/*var TiGoosh = require('ti.goosh');
+				TiGoosh.registerForPushNotifications({
+				// The callback to invoke when a notification arrives.
+				callback: pushCallback,
 
+				// The callback invoked when you have the device token.
+				success: registerPushSuccess,
 
-			// Set Timeout
-			xhr.timeout = 5000;
-
-			// Open Connection
-			xhr.open("POST", params.url);
-
-			if(session_token != null){
-				xhr.setRequestHeader("X-Parse-Session-Token", session_token);
-			}
-
-			// Set Headers required for Parse
-			xhr.setRequestHeader("X-Parse-Application-Id", app_key);
-			xhr.setRequestHeader("X-Parse-REST-API-Key", rest_key);
-			xhr.setRequestHeader("Content-Type", "application/json");
-
-
-
-			xhr.send( JSON.stringify(params.options) );
-
-			return cloudDefer.promise;
-
-
+				// The callback invoked on some errors.
+				error: registerPushError
+			});*/
+		}
 	},
 
+
+	/**
+	* Register Device with Parse Backend
+	* @param  {[type]} opts [description]
+	* @return {[type]}      [description]
+	*/
+	registerForPush : function(opts) {
+		var cloudDefer = Q.defer();
+
+		var params = {};
+		params.url = base_url + "installations";
+		params.type = "POST";
+		params.options = {
+			"deviceType": (OS_IOS) ? "ios" :"android",
+			"deviceToken" : opts.token,
+			"channels": [
+				""
+			]
+		};
+
+		if(OS_ANDROID){
+			params.options["pushType"] =  "gcm";
+			params.options["GCMSenderId"] = "561148704207";
+		}
+
+
+		var xhr = Titanium.Network.createHTTPClient({
+		});
+
+		xhr.onload = function(){
+			console.log("PUSH REGISTER SUCCESS");
+			cloudDefer.resolve( JSON.parse(this.responseText) );
+		}
+
+		xhr.onerror = function(){
+			console.error(this.responseText);
+		}
+
+
+		// Set Timeout
+		xhr.timeout = 5000;
+
+		// Open Connection
+		xhr.open("POST", params.url);
+
+		if(session_token != null){
+			xhr.setRequestHeader("X-Parse-Session-Token", session_token);
+		}
+
+		// Set Headers required for Parse
+		xhr.setRequestHeader("X-Parse-Application-Id", app_key);
+		xhr.setRequestHeader("X-Parse-REST-API-Key", rest_key);
+		xhr.setRequestHeader("Content-Type", "application/json");
+		xhr.send( JSON.stringify(params.options) );
+
+		return cloudDefer.promise;
+	},
 
 	/**
 	* [runCloudCode description]
 	* @param  {[type]} options [description]
 	* @return {[type]}         [description]
 	*/
-	runCloudCode : function(params){
+	runCloudCode : function(params) {
 		try {
-
 
 			var cloudDefer = Q.defer();
 			params.url = base_url + "functions/" + params.name;
@@ -333,22 +421,20 @@ var initdeferred;
 			var xhr = Titanium.Network.createHTTPClient({
 			});
 
-			xhr.onload = function(){
-				cloudDefer.resolve( JSON.parse(this.responseText).result );
+			xhr.onload = function() {
+				cloudDefer.resolve(JSON.parse(this.responseText).result);
 			}
 
-			xhr.onerror = function(){
+			xhr.onerror = function() {
 				console.error(this.responseText);
 			}
-
-
 			// Set Timeout
 			xhr.timeout = 5000;
 
 			// Open Connection
 			xhr.open("POST", params.url);
 
-			if(session_token != null){
+			if (session_token != null) {
 				xhr.setRequestHeader("X-Parse-Session-Token", session_token);
 			}
 
@@ -357,27 +443,81 @@ var initdeferred;
 			xhr.setRequestHeader("X-Parse-REST-API-Key", rest_key);
 			xhr.setRequestHeader("Content-Type", "application/json");
 
-
-
-			xhr.send( JSON.stringify(params.options) );
+			xhr.send(JSON.stringify(params.options));
 
 			return cloudDefer.promise;
 		} catch (error) {
 			console.error(error);
 		}
 	}
-
-
-
 };
 
 
 
 
+/*
+██████  ██    ██ ███████ ██   ██
+██   ██ ██    ██ ██      ██   ██
+██████  ██    ██ ███████ ███████
+██      ██    ██      ██ ██   ██
+██       ██████  ███████ ██   ██
+*/
+
+/**
+* Called if a Push is received
+* @return {[type]} [description]
+*/
+function callbackPush(e){
+
+	if(e.inBackground){
+		//pushInBackground(e.data);
+	}else{
+		//pushInForeground(e.data);
+	}
+
+}
 
 
 
 
+
+
+/**
+* Called if the Push is registered on Android or iOS
+* @param  {[type]} e [description]
+* @return {[type]}   [description]
+*/
+function registerPushSuccess(e){
+	console.debug("Push ::: registerPushSuccess", e);
+
+	// Set device_token
+	if(OS_IOS){
+		device_token = e.deviceToken;
+	}else{
+		device_token = e.deviceToken;
+	}
+
+	// Register for Push on Parse
+	//if(!push_register){
+	TiParse.registerForPush({
+		token : device_token
+	}).then(function(response){
+		console.debug("REGISTER PUSH WITH PARSE SUCCESS ::: " + device_token);
+	});
+	push_register = true;
+	//}
+
+}
+
+
+/**
+* Error registering Push on Android or iOS
+* @param  {[type]} e [description]
+* @return {[type]}   [description]
+*/
+function registerPushError(e){
+	console.debug("Push ::: registerPushError", e);
+}
 
 
 
@@ -422,7 +562,6 @@ function loadHandler() {
 	dbDefer.resolve();
 }
 
-
 /**
 * [deleteDatabase Delete the Database]
 * @return {[type]} [description]
@@ -433,20 +572,177 @@ function deleteDatabase() {
 	db.deleteDatabase();
 }
 
-
-
-
 /**
 * Handles Network Changes automaticly
 * @param  {[type]} e [description]
 * @return {[type]}   [description]
 */
-function onNetworkChange(e){
+function onNetworkChange(e) {
+	console.debug("TRAINADOO :::: NETWORK CHANGE");
+}
+
+/*if (response.success) {
+if (model.parent) {
+var res = JSON.parse(response.responseText)[model.parent];
+} else {
+var res = JSON.parse(response.responseText);
+}
+
+// Write to local Database
+//db_write_Cache(params.class, res);
+params.success(res);
+
+if (params.skipPromise) {
+//
+} else {
+deferred.resolve(res);
+}
+} else {
+params.error(response);
+deferred.reject(response);
+}*/
+
+/**
+* Get Models from Cache-Database
+* @param  {[type]} params [description]
+* @return {[type]}        [description]
+*/
+function readFromDatabase(params, _callback) {
+
+	//console.log(params);
+	try {
+
+		if (params.className !== "users" && params.className !== undefined) {
+
+			// Check if Collection is already available
+			var _collection = db.getCollection(params.className);
+			//console.log("_collection: " + _collection);
+			//console.log("_collection: " + _collection.find());
+
+			var results = _collection.find({
+				//limit : 20,
+				//skip : 0
+			});
+
+			// Callback
+			_callback({
+				code : 200,
+				responseText : JSON.stringify(results)
+			});
+		}
+
+	} catch(error) {
+		console.error(error);
+	}
 
 }
 
+/**
+* Save Data to the local Database / Cache
+* @return {[type]} [description]
+*/
+function saveToDatabase(params) {
 
+	// Exclude Users
+	if (params.className !== "users" && params.className !== undefined) {
+		//console.debug("DATABASE :::: save to Database: " + params.className);
 
+		// Check if Collection is already available
+		var _collection = db.getCollection(params.className);
+		if (_collection == null) {
+			_collection = db.addCollection(params.className, {
+				unique : ['objectId'],
+				indices : ['objectId'],
+				autoupdate : true
+			});
+		} else {
+			//
+		}
+
+		// Parse Results to JSON
+		var _json = JSON.parse(params.data).results;
+
+		// Insert all Data to Local-Collection
+		_.each(_json, function(item) {
+			if (_collection.findOne({
+				'objectId' : item.objectId
+			})) {
+				_collection.chain().find({
+					'objectId' : item.objectId
+				}).update(function updateCB(obj) {
+					_.extend(obj, item);
+					return item;
+				});
+			} else {
+				//console.log("Not found item");
+				_collection.insert(item);
+			}
+		});
+	} // else
+}// Fn
+
+/**
+* Saves a remote File to the device Filesystem
+* @return {[type]} [description]
+*/
+function saveFileToCache(f_blob, f_name, f_extension) {
+	// Blob
+	var image = "";
+	//event.media
+
+	// Create a file name
+	var filename = f_name + "." + f_extension;
+
+	// Create the file in the application directory
+	file = Titanium.Filesystem.getFile(Titanium.Filesystem.applicationDataDirectory, filename);
+
+	// Write the image to the new file (image created from camera)
+	file.write(image);
+
+	console.log("FILE: " + file);
+
+	/*images[i] = Ti.UI.createImageView({
+	image: Titanium.Filesystem.applicationDataDirectory + Ti.Filesystem.separator + imageArray[i].image, // path to image at applicationDataDirectory
+	width: 75,
+	height: 96,
+	left: pushleft + 5, // logic for positioning
+	top: pushtop + 5, // logic for positioning
+	store_id: imageArray[i].id
+});*/
+
+}
+
+/**
+* Download an Image from an URL
+* @return {[type]} [description]
+*/
+function downloadImage(_url) {
+	var downloadDefer = Q.defer();
+
+	// Create XHR
+	var xhr = Titanium.Network.createHTTPClient();
+	xhr.onload = function() {
+		var blob = this.responseText;
+		//console.log("Blob: " + blob.length);
+		downloadDefer.resolve(blob);
+	}
+	xhr.onerror = function() {
+		downloadDefer.reject("Error");
+	}
+	xhr.open('GET', _url);
+	xhr.send();
+
+	return downloadDefer.promise;
+}
+
+// Download Image
+/*downloadImage("https://pg-app-uiim3t3gldv0bbx8gdjyrshkwwjl27.s3.amazonaws.com/fff7ef994f6f9203f458d3f4d853565e_83.jpg").then(function(_blob) {
+alert("Image downloaded")
+
+// Save File to Cache
+saveFileToCache(_blob, "test", "jpg");
+
+});*/
 
 
 
@@ -468,6 +764,12 @@ Parse.Backbone = {
 	classNameUser : "_User"
 }
 
+
+
+
+
+
+
 /*
 ███████ ██    ██ ███    ██  ██████
 ██       ██  ██  ████   ██ ██
@@ -479,10 +781,8 @@ Parse.Backbone = {
 Parse.Backbone.sync = function(method, model, options) {
 	var deferred = Q.defer();
 	//console.log("-----------------------");
-	//console.log("-------- Sync ---------");
+	//c/onsole.log("-------- Sync ---------");
 	//console.log("-----------------------");
-
-	//console.log("MODEL: " + JSON.stringify(model));
 
 	// Type
 	var type = methodMap[method];
@@ -497,7 +797,7 @@ Parse.Backbone.sync = function(method, model, options) {
 	params.type = options.requestMethod || type;
 
 	// Set Classname for caching Purpose
-	params.classname = options.classname;
+	params.className = model.getClassName();
 
 	// Custom URL
 	params.url = (options.url ) ? base_url + params.url : base_url + model.url;
@@ -508,13 +808,19 @@ Parse.Backbone.sync = function(method, model, options) {
 		_.extend(params.urlparams, _.isFunction(model.config.URLPARAMS) ? model.config.URLPARAMS() : model.config.URLPARAMS);
 	}
 
+	//console.log("Method: " + method);
+
 	switch( method ) {
 
-		// -------------------------------------------------------
-		//
-		// READ - GET
-		//
-		// -------------------------------------------------------
+		/*
+		########  ########    ###    ########
+		##     ## ##         ## ##   ##     ##
+		##     ## ##        ##   ##  ##     ##
+		########  ######   ##     ## ##     ##
+		##   ##   ##       ######### ##     ##
+		##    ##  ##       ##     ## ##     ##
+		##     ## ######## ##     ## ########
+		*/
 		case "read":
 
 		// Detect if it should read a specified Model
@@ -533,35 +839,50 @@ Parse.Backbone.sync = function(method, model, options) {
 		}
 
 		// Custom Endpoints for fetch Method
-		if(params.customMethod){
+		if (params.customMethod) {
 			params.type = "POST";
 			var _url = base_url + "functions/" + params.customMethod;
-			params.url = encodeData(params.urlparams, _url);
+			params.url = encodeData(params.customparams, _url);
 			params.data = JSON.stringify(params.options);
-		}
 
+			/*console.log("URL: " + params.url);
+			console.log("URL: " + params.data);
+			console.log(params.urlparams);
+			console.log(params.customparams);
+			console.log(JSON.stringify(params.options));*/
+		}
 
 		//
 		// Execute HTTP Call
 		//
 		http_request(params, function(response) {
-			try{
-				//console.log(response);
-				if(params.customMethod && response.success){
-					var json = JSON.parse(response.responseText).result;
-					_.each(json, function(item){
-						Alloy.Collections[params.collname].add( new M_Event(item));
-					});
 
+			try {
+				if (params.customMethod && response.success) {
+					var json = JSON.parse(response.responseText).result;
+
+
+					_.each(json, function(item) {
+						Alloy.Collections[params.collname].add(new M_Event(item));
+					});
 					Alloy.Collections[params.collname].trigger("change");
+
+
 					deferred.resolve(json);
-				}else{
+				} else {
 					if (response.success) {
-						if (model.parent) {
+
+						//console.log(response.responseText);
+						//console.log(model.parent)
+
+						// Only try to parse parent Element if available in model AND App is online
+						if (model.parent && Titanium.Network.online) {
 							var res = JSON.parse(response.responseText)[model.parent];
 						} else {
 							var res = JSON.parse(response.responseText);
 						}
+
+						//console.log("RES: " + res);
 
 						// Write to local Database
 						//db_write_Cache(params.class, res);
@@ -578,7 +899,7 @@ Parse.Backbone.sync = function(method, model, options) {
 					}
 				}
 
-			}catch(error){
+			} catch(error) {
 				console.error(error);
 			}
 
@@ -629,20 +950,25 @@ Parse.Backbone.sync = function(method, model, options) {
 			params.url += "/" + payload[model.idAttribute];
 		}
 
-		//params.data = JSON.stringify(payload);
+		//console.log("changes: ", params.changes );
 
-		if(Object.size(params.changes) > 0){
+		if (Object.size(params.changes) > 0) {
 			var d = {};
-			for (var c in params.changes){
+			for (var c in params.changes) {
 				d[c] = payload[c]
 			}
 			params.data = JSON.stringify(d);
-		}else{
-			params.data = payload;	//JSON.stringify(payload);
+		} else {
+			params.data = {};//payload;
 		}
+
+		//console.log("Params: " , params);
 
 		// Make HTTP Call
 		http_request(params, function(response) {
+
+
+
 			if (response.success) {
 				var res = JSON.parse(response.responseText);
 				params.success(res);
@@ -654,7 +980,6 @@ Parse.Backbone.sync = function(method, model, options) {
 			}
 		});
 		break;
-
 
 		case "delete":
 		// Detect if it should read a specified Model
@@ -679,17 +1004,22 @@ Parse.Backbone.sync = function(method, model, options) {
 
 
 	// Return Promise
-	if(options.url == "login"){
+	if (options.url == "login") {
 		return loginDefer.promise;
 		//}else if(options.url = "users/me"){
 		//	return refreshDefer.promise;
-	}else{
+	} else {
 		return deferred.promise;
 	}
 }// fn
 
-
-
+Object.size = function(obj) {
+	var size = 0, key;
+	for (key in obj) {
+		if (obj.hasOwnProperty(key)) size++;
+	}
+	return size;
+};
 
 /*
 ██   ██ ████████ ████████ ██████      ██████  ███████  ██████  ██    ██ ███████ ███████ ████████
@@ -706,7 +1036,8 @@ Parse.Backbone.sync = function(method, model, options) {
 * @return {[type]}            [description]
 */
 function http_request(options, callback) {
-	//console.log("call http_request with URL: " + options.url);
+
+	//console.log("Options", options);
 
 	// Check if Internet Connection is available, otherwise use local Data
 	if (Titanium.Network.online) {
@@ -716,12 +1047,20 @@ function http_request(options, callback) {
 
 		// Request is successfull
 		xhr.onload = function() {
-			//console.log("SUCCES: " +  this.responseText);
 			callback({
 				success : true,
 				code : this.status,
 				responseText : this.responseText,
 			});
+
+			//
+			// Save Results to Database
+			//
+			saveToDatabase({
+				className : options.className,
+				data : this.responseText
+			});
+
 		}
 		// Request failed
 		xhr.onerror = function() {
@@ -736,22 +1075,16 @@ function http_request(options, callback) {
 		// Set Timeout for each Request
 		xhr.timeout = timeout;
 
-
 		// Open a new Connection
 		xhr.open(options.type, options.url);
 
-
 		// Set Session-Token Header, if available
-		//console.log("Session-Token: " + session_token);
 		if (session_token != null) {
 			xhr.setRequestHeader("X-Parse-Session-Token", session_token);
 		}
 
-		//console.log("Session Token: " + session_token);
-
 		// Set Content-Type for POST & PUT Operations only
 		xhr.setRequestHeader("Content-Type", "application/json");
-
 
 		// Set Headers required for Parse Server
 		xhr.setRequestHeader("X-Parse-Application-Id", app_key);
@@ -764,23 +1097,35 @@ function http_request(options, callback) {
 			});
 		}
 
-
-		//console.log(options);
-
-		try{
-			if(xhr.type === "PUT"){
+		try {
+			if (xhr.type === "PUT") {
 				xhr.send(options.data);
-			}else{
+			} else {
 				xhr.send(options.data);
 				//JSON.stringify(options.data)
 			}
-		}catch(error){
+		} catch(error) {
 			console.error(error);
 		}
 
 	} else {
 		// Do offline Stuff
 		// Handle Method to return data or store the POST/PUT/DELETE Requst
+
+		readFromDatabase({
+			className : options.className
+		}, function(response) {
+			try {
+				callback({
+					success : true,
+					code : response.status,
+					responseText : response.responseText,
+				});
+			} catch(error) {
+				console.error(error);
+			}
+
+		});
 
 	}
 }
@@ -819,7 +1164,14 @@ Parse.Backbone.UserMixin = _.extend({}, SyncMixin, {
 		//
 	},
 	url : "users",
-	guest : false,
+	initialize : function() {
+		// Set Classname for caching and stuff
+		this.className = this.url;
+	},
+
+	getClassName : function() {
+		return this.className.toString();
+	},
 
 	register : function(params) {
 		registerDefer = Q.defer();
@@ -830,83 +1182,87 @@ Parse.Backbone.UserMixin = _.extend({}, SyncMixin, {
 		opts.url = base_url + "users";
 		opts.type = "POST";
 
-
-		// Params
-		//opts.data = '{"username":"' + params.username + '","password":"' + params.password + '"}';
-
 		// Parse Params to opts.data
 		opts.data = '{';
 		for( o in params){
-			if(o == "username"){
-				opts.data += '"'+o+'":"'+ params[o]+'"';
-			}else{
-				opts.data += '"'+o+'":"'+ params[o]+'",';
-			}
-
+			//if(o == "username"){
+			//opts.data += '"'+o+'":"'+ params[o]+'"';
+			//}else{
+			opts.data += '"'+o+'":"'+ params[o]+'",';
+			//}
 		}
-		opts.data += '}';
-		console.log(opts.data);
 
+		//console.debug(opts.data.lastIndexOf(',') + ", " + opts.data.length);
+		if(opts.data.lastIndexOf(',') == (opts.data.length-1) ){
+			//console.debug("KILL KOMMA");
+			opts.data = opts.data.substring(0, opts.data.length - 1);
+		}
+
+		opts.data += '}';
+		//console.debug("Opts data: ", opts.data);
 
 		// Call HTTP Request
 		http_request(opts, function(response) {
 			if (response.success) {
-				var res = JSON.parse(response.responseText);
-				//onUserRegistration();
-				registerDefer.resolve(res);
+				onUserRegister(JSON.parse(response.responseText));
 			} else {
-				console.error(response.responseText);
+				console.error(JSON.stringify(response));
 				return registerDefer.reject(response.responseText);
 			}
 		});
-
 		return registerDefer.promise;
 	},
-
-	// {"username":"lkj@htr.de","password":"sa"}{"first_name" + "Lolol""last_name" + "Jljkljk""email" + "lkj@htr.de""password" + "sa""password_check" + "sa""username" + "lkj@htr.de"}
-
-
 
 	/**
 	* Register with Facebook
 	* @param  {[type]} params [description]
 	* @return {[type]}        [description]
 	*/
-	registerWithFacebook : function(params){
-		providerDefer = Q.defer();
+	registerWithFacebook : function(params) {
+		registerDefer = Q.defer();
+		try{
 
-		var opts = {};
-		// Adjust URL
-		//
-		opts.url = base_url + "users";
-		opts.type = "POST";
+			var opts = {};
+			// Adjust URL
+			//
+			opts.url = base_url + "users";
+			opts.type = "POST";
 
-		// Data String
-		opts.data = '{"last_name":"'+params.last_name+'","first_name":"'+params.first_name+'","username":"'+params.username+'","authData" : {"facebook" : {"id" : "'+params.userid+'","access_token" :	"'+params.access_token+'","expiration_date" : "'+params.expiration_date+'"}}}';
+			// Data String
+			//opts.data = '{"last_name":"' + params.last_name + '","first_name":"' + params.first_name + '","username":"' + params.username + '","authData" : {"facebook" : {"id" : "' + params.userid + '","access_token" :	"' + params.access_token + '","expiration_date" : "' + params.expiration_date + '"}}}';
 
+			opts.data = {
+				firstname : params["first_name"],
+				lastname : params["last_name"],
+				fullname : params["fullname"],
+				username : params["username"],
+				email : params["username"],
+				authData : {
+					facebook : {
+						id : params["userid"],
+						access_token : params["access_token"],
+						expiration_date : params["expiration_date"]
+					}
+				}
+			};
+			// Parse the Object
+			opts.data = JSON.stringify(opts.data);
 
-		// Data String
-		//opts.data = '{"username" : "'+params.username+'","first_name" : "'+params.first_name+'","last_name" : "'+params.last_name+'",	"authData" : {"facebook" : {"id" : "'+params.userid+'","access_token" :	"'+params.access_token+'","expiration_date" : "'+params.expiration_date+'"}}}';
+		}catch(error){
+			console.error(error);
+		}
 
-		//	opts.data = '{"authData" : {"facebook" : {"id" : "'+params.userid+'","access_token" :	"'+params.access_token+'","expiration_date" : "'+params.expiration_date+'"}}}';
 
 		// Make HTTP Request
 		http_request(opts, function(response) {
 			if (response.success) {
-				var res = JSON.parse(response.responseText);
-				//onUserRegistration();
-				providerDefer.resolve(res);
+				onUserRegister(JSON.parse(response.responseText));
 			} else {
 				console.error(response.responseText);
-				return providerDefer.reject(response.responseText);
+				return registerDefer.reject(response.responseText);
 			}
 		});
-
-		return providerDefer.promise;
-	},
-
-	isGuest : function(){
-		return this.guest;
+		return registerDefer.promise;
 	},
 
 	/**
@@ -917,50 +1273,34 @@ Parse.Backbone.UserMixin = _.extend({}, SyncMixin, {
 	login : function(params) {
 		loginDefer = Q.defer();
 
-		if(params.guest){
-			//this.guest = true;
-			IS_GUEST = true;
-
-			// Save Data
-			//console.log( this );
-			//
-			//	return Backbone.Model.prototype.save.call(this, {guest : true}, {});
-
-			loginDefer.resolve("as guest");
-		}else{
-			if (params.username == null || params.password == null) {
-				deferred.reject();
-			}
-
-			// Opts
-			var opts = {};
-
-			// Params
-			opts.urlparams = {
-				username : params.username,
-				password : params.password
-			};
-
-			opts.success = onUserLogin;
-			opts.error = function(error) {
-				console.error(error)
-			}
-			// Adjust URL
-			opts.url = base_url + "login";
-			opts.type = "GET";
-			opts.url = encodeData(opts.urlparams, opts.url);
-
-			// Make HTTP Call
-			http_request(opts, function(response) {
-				if (response.success) {
-					onUserLogin(JSON.parse(response.responseText));
-				} else {
-					console.error(response.responseText)
-					loginDefer.reject("error");
-				}
-			});
+		if (params.username == null || params.password == null) {
+			deferred.reject();
 		}
 
+		// Opts
+		var opts = {};
+
+		// Params
+		opts.urlparams = {
+			username : params.username,
+			password : params.password
+		};
+
+
+		// Adjust URL
+		opts.url = base_url + "login";
+		opts.type = "GET";
+		opts.url = encodeData(opts.urlparams, opts.url);
+
+		// Make HTTP Call
+		http_request(opts, function(response) {
+			if (response.success) {
+				onUserLogin(JSON.parse(response.responseText));
+			} else {
+				console.error(response.responseText)
+				loginDefer.reject("error");
+			}
+		});
 		return loginDefer.promise;
 	},
 
@@ -988,6 +1328,10 @@ Parse.Backbone.UserMixin = _.extend({}, SyncMixin, {
 				// Set active_user to null
 				active_user = null;
 
+				if(FACEBOOK){
+					FACEBOOK.logout();
+				}
+
 				// Delete Database after Logout
 				deleteDatabase();
 
@@ -999,6 +1343,7 @@ Parse.Backbone.UserMixin = _.extend({}, SyncMixin, {
 		});
 		return logoutDefer.promise;
 	},
+
 
 	/**
 	* Refreshes the active_user and return it
@@ -1030,14 +1375,12 @@ Parse.Backbone.UserMixin = _.extend({}, SyncMixin, {
 		// Return Method
 		return Backbone.Model.prototype.save.call(this, attrs, opts);
 	}
-
 });
 
-/**
-* [onUserLogin description]
-* @return {[type]} [description]
-*/
-function onUserLogin(model) {
+
+
+
+function onUserRegister(model){
 	// Set Active User
 	active_user = new basic_userModel(model);
 
@@ -1048,13 +1391,13 @@ function onUserLogin(model) {
 	if (coll_statics.findOne({
 		key : "session_token"
 	})) {
-		console.log("Session token available --> Update");
+		console.log("USER REGISTER Session token available --> Update");
 		var o = coll_statics.findOne({
 			key : "session_token"
 		});
 		o.value = session_token;
 	} else {
-		console.log("Session token is not available");
+		console.log("USER REGISTER Token is not available --> Create");
 		coll_statics.insert({
 			key : "session_token",
 			value : session_token
@@ -1076,8 +1419,66 @@ function onUserLogin(model) {
 		});
 	}
 
-	loginDefer.resolve(active_user);
+	registerDefer.resolve(active_user);
 }
+
+
+
+
+/**
+* [onUserLogin description]
+* @return {[type]} [description]
+*/
+function onUserLogin(model) {
+	try{
+		console.debug("onUserLogin");
+		// Set Active User
+		active_user = new basic_userModel(model);
+
+		// Set Session Token
+		session_token = active_user.get('sessionToken');
+
+		// Save Session in Database
+		if (coll_statics.findOne({
+			key : "session_token"
+		})) {
+			console.log("Session token available --> Update");
+			var o = coll_statics.findOne({
+				key : "session_token"
+			});
+			o.value = session_token;
+		} else {
+			console.log("Session token is not available");
+			coll_statics.insert({
+				key : "session_token",
+				value : session_token
+			});
+		}
+
+		// Save active_user in Database
+		if (coll_statics.findOne({
+			key : "active_user"
+		})) {
+			var o = coll_statics.findOne({
+				key : "active_user"
+			});
+			o.value = model;
+		} else {
+			coll_statics.insert({
+				key : "active_user",
+				value : model
+			});
+		}
+
+
+
+
+		loginDefer.resolve(active_user);
+	}catch(error){
+		console.error(error);
+	}
+}
+
 
 
 
@@ -1100,22 +1501,6 @@ function onRefreshUser(model, response, options) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*
 ███    ███  ██████  ██████  ███████ ██
 ████  ████ ██    ██ ██   ██ ██      ██
@@ -1130,10 +1515,13 @@ Parse.Backbone.ModelMixin = _.extend({}, SyncMixin, {
 	},
 	initialize : function() {
 		// Set Classname for caching and stuff
-		this.classname = this.url;
+		this.className = this.url;
 
 		// Set custom URL for Parse-Requests
 		this.url = "classes/" + this.url;
+	},
+	getClassName : function() {
+		return this.className.toString();
 	}
 });
 
@@ -1144,12 +1532,25 @@ Parse.Backbone.CollectionMixin = _.extend({}, SyncMixin, {
 	},
 	initialize : function() {
 		// Set Classname for caching and stuff
-		this.classname = this.url;
+		this.className = this.url;
 
 		// Set custom URL for Parse-Requests
 		this.url = "classes/" + this.url;
 	},
+	getClassName : function() {
+		return this.className.toString();
+	}
 });
+
+
+
+
+
+
+
+
+
+
 
 function encodeData(obj, url) {
 	var str = [];
@@ -1162,6 +1563,10 @@ function encodeData(obj, url) {
 		return url + "&" + str.join("&");
 	}
 }
+
+
+
+
 
 return Parse;
 }
